@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical" android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="640px"
+        android:orientation="horizontal">
+        <com.example.fengweilun.hevcimageviewer.MyGLSurfaceView
+            android:id="@+id/glsurfaceview1"
+            android:layout_width="480px"
+            android:layout_height="640px"
+            />
+        <com.example.fengweilun.hevcimageviewer.MyGLSurfaceView
+            android:id="@+id/glsurfaceview2"
+            android:layout_width="480px"
+            android:layout_height="640px"
+            />
+        <!--<com.example.fengweilun.hevcimageviewer.MyGLSurfaceView-->
+            <!--android:id="@+id/glsurfaceview2"-->
+            <!--android:layout_width="480px"-->
+            <!--android:layout_height="640px"-->
+            <!--/>-->
+        <!--<com.example.fengweilun.hevcimageviewer.MyGLSurfaceView-->
+            <!--android:id="@+id/glsurfaceview3"-->
+            <!--android:layout_width="480px"-->
+            <!--android:layout_height="640px"-->
+            <!--/>-->
+        <!--<com.example.fengweilun.hevcimageviewer.MyGLSurfaceView-->
+            <!--android:id="@+id/glsurfaceview4"-->
+            <!--android:layout_width="480px"-->
+            <!--android:layout_height="640px"-->
+            <!--/>-->
+    </LinearLayout>
+</LinearLayout>
