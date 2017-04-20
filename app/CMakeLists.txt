@@ -80,6 +80,7 @@ add_library( # Sets the name of the library.
              SHARED
 
              # Provides a relative path to your source file(s).
-             ${CMAKE_SOURCE_DIR}/src/main/cpp/native_show.cpp )
+             ${CMAKE_SOURCE_DIR}/src/main/cpp/native_show.cpp
+             ${CMAKE_SOURCE_DIR}/src/main/cpp/ImageCodec.cpp)
 include_directories(${CMAKE_SOURCE_DIR}/src/main/cpp/include/)
 target_link_libraries(imageshow ${z-lib} ${m-lib} avcodec swresample swscale avutil ${log-lib} ${jnigraphic-lib} ${GLES-lib} ${android-lib})
