@@ -8,7 +8,6 @@ cmake_minimum_required(VERSION 3.4.1)
 # or SHARED, and provides the relative paths to its source code.
 # You can define multiple libraries, and CMake builds them for you.
 # Gradle automatically packages shared libraries with your APK.
-
 add_library( avcodec
              STATIC
              IMPORTED )
@@ -57,6 +56,8 @@ set_target_properties( # Specifies the target library.
 find_library(z-lib z)
 find_library(m-lib m)
 
+add_library(ImageCodec STATIC ${CMAKE_SOURCE_DIR}/src/main/cpp/ImageCodec.cpp
+                              ${CMAKE_SOURCE_DIR}/src/main/cpp/threadpool.cpp)
 
 # Searches for a specified prebuilt library and stores the path as a
 # variable. Because CMake includes system libraries in the search path by
@@ -69,6 +70,7 @@ find_library(jnigraphic-lib jnigraphics)
 find_library(GLES-lib GLESv2)
 find_library(android-lib android)
 
+
 # Specifies libraries CMake should link to your target library. You
 # can link multiple libraries, such as libraries you define in this
 # build script, prebuilt third-party libraries, or system libraries.
@@ -80,7 +82,7 @@ add_library( # Sets the name of the library.
              SHARED
 
              # Provides a relative path to your source file(s).
-             ${CMAKE_SOURCE_DIR}/src/main/cpp/native_show.cpp
-             ${CMAKE_SOURCE_DIR}/src/main/cpp/ImageCodec.cpp)
+             ${CMAKE_SOURCE_DIR}/src/main/cpp/native_show.cpp)
 include_directories(${CMAKE_SOURCE_DIR}/src/main/cpp/include/)
-target_link_libraries(imageshow ${z-lib} ${m-lib} avcodec swresample swscale avutil ${log-lib} ${jnigraphic-lib} ${GLES-lib} ${android-lib})
+target_link_libraries(ImageCodec ${log-lib} avcodec avutil)
+target_link_libraries(imageshow ImageCodec ${z-lib} ${m-lib} avcodec swresample swscale avutil ${log-lib} ${jnigraphic-lib} ${GLES-lib} ${android-lib})

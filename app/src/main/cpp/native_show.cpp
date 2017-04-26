@@ -1,42 +1,14 @@
-extern "C" {
+#include "ImageCodec.h"
+#include "threadpool.h"
+
+extern "C"
+{
 #include <jni.h>
-#include "libavcodec/avcodec.h"
-#include "libswscale/swscale.h"
-#include <android/log.h>
 #include <GLES2/gl2.h>
+#include <stdlib.h>
+#include "ImageCodec.h"
+#include "utils.h"
 #define TAG "NativeCodec"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
-
-typedef enum CODEC_NAME
-{
-    CODEC_HEVC,
-    CODEC_WEBP
-}CODEC_NAME;
-typedef struct CodecContext
-{
-    CODEC_NAME codec_name;
-    AVCodec *pCodec = NULL;
-    AVFrame *pFrame = NULL;
-    AVCodecContext *pCodecCtx = NULL;
-    AVCodecParserContext *pCodecParserCtx = NULL;
-    uint8_t *buffer;
-    size_t filesize;
-    FILE *file;
-    int IMG_WIDTH;
-    int IMG_HEIGHT;
-    uint8_t *yuv_buffer;
-    jlong decode_times;
-}CodecContext;
-
-
-
-static CodecContext hevc, webp;
-
-uint8_t yuv_webp[960 * 720 * 3 / 2];
-
-
-
 
 static const char gVertexShader[] =
 "attribute vec4 a_position;\n"
@@ -66,24 +38,30 @@ static const char gFragmentShader[] =
 "gl_FragColor = vec4(rgb, 1);\n"
 "}\n";
 
-static void printGLString(const char *name, GLenum s) {
+static void printGLString(const char *name, GLenum s)
+{
     const char *v = (const char *) glGetString(s);
     LOGI("GL %s = %s\n", name, v);
 }
 
-static GLuint loadShader(GLenum shaderType, const char *pSource) {
+static GLuint loadShader(GLenum shaderType, const char *pSource)
+{
     GLuint shader = glCreateShader(shaderType);
-    if (shader) {
+    if (shader)
+    {
         glShaderSource(shader, 1, &pSource, NULL);
         glCompileShader(shader);
         GLint compiled = 0;
         glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
-        if (!compiled) {
+        if (!compiled)
+        {
             GLint infoLen = 0;
             glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infoLen);
-            if (infoLen) {
+            if (infoLen)
+            {
                 char *buf = (char *) malloc((size_t)infoLen);
-                if (buf) {
+                if (buf)
+                {
                     glGetShaderInfoLog(shader, infoLen, NULL, buf);
                     LOGE("Could not compile shader %d:\n%s\n", shaderType, buf);
                     free(buf);
@@ -96,8 +74,8 @@ static GLuint loadShader(GLenum shaderType, const char *pSource) {
     return shader;
 }
 
-static GLuint createProgram(const char *pVertexSource,
-                            const char *pFragmentSource) {
+static GLuint createProgram(const char *pVertexSource, const char *pFragmentSource)
+{
     GLuint vertexShader = loadShader(GL_VERTEX_SHADER, pVertexSource);
     if (!vertexShader) {
         return 0;
@@ -109,18 +87,22 @@ static GLuint createProgram(const char *pVertexSource,
     }
 
     GLuint program = glCreateProgram();
-    if (program) {
+    if (program)
+    {
         glAttachShader(program, vertexShader);
         glAttachShader(program, fragmentShader);
         glLinkProgram(program);
         GLint linkStatus = GL_FALSE;
         glGetProgramiv(program, GL_LINK_STATUS, &linkStatus);
-        if (linkStatus != GL_TRUE) {
+        if (linkStatus != GL_TRUE)
+        {
             GLint bufLength = 0;
             glGetProgramiv(program, GL_INFO_LOG_LENGTH, &bufLength);
-            if (bufLength) {
+            if (bufLength)
+            {
                 char *buf = (char *) malloc((size_t)bufLength);
-                if (buf) {
+                if (buf)
+                {
                     glGetProgramInfoLog(program, bufLength, NULL, buf);
                     LOGE("Could not link program:\n%s\n", buf);
                     free(buf);
@@ -147,77 +129,6 @@ static GLfloat textureCoords[] = {
         1.0, 0.0
 };
 
-static void codec_context_init(CodecContext *codec, const char *filename)
-{
-    codec->file = fopen(filename, "rb");
-    if (!codec->file) {
-        LOGE("Error open file");
-        return;
-    }
-    fseek(codec->file, 0, SEEK_END);
-    codec->filesize = (size_t) ftell(codec->file);
-    fseek(codec->file, 0, SEEK_SET);
-    LOGI("filesize: %d", codec->filesize);
-    codec->buffer = (uint8_t *) malloc(sizeof(uint8_t) * codec->filesize);
-    if (!codec->buffer) {
-        LOGE("Error malloc file buf");
-        return;
-    }
-    if (codec->filesize != fread(codec->buffer, 1, codec->filesize, codec->file)) {
-        LOGE("Error read file");
-        return;
-    }
-    fclose(codec->file);
-
-    avcodec_register_all();
-
-    switch(codec->codec_name)
-    {
-        case CODEC_WEBP:
-            codec->pCodec = avcodec_find_decoder(AV_CODEC_ID_WEBP);
-            break;
-        case CODEC_HEVC:
-            codec->pCodec = avcodec_find_decoder(AV_CODEC_ID_HEVC);
-            break;
-        default:
-            LOGE("Codec not support");
-            return;
-    }
-
-    if (!codec->pCodec) {
-        LOGE("Codec not found\n");
-        return;
-    }
-    codec->pCodecCtx = avcodec_alloc_context3(codec->pCodec);
-    if (!codec->pCodecCtx) {
-        LOGE("Could not allocate video codec context\n");
-        return;
-    }
-
-    switch(codec->codec_name)
-    {
-        case CODEC_WEBP:
-            //codec->pCodecParserCtx = av_parser_init(AV_CODEC_ID_WEBP);
-            break;
-        case CODEC_HEVC:
-            codec->pCodecParserCtx = av_parser_init(AV_CODEC_ID_HEVC);
-            if (!codec->pCodecParserCtx) {
-                LOGE("Could not allocate video parser context\n");
-                return;
-            }
-            break;
-        default:
-            LOGE("Codec not support");
-            return;
-    }
-
-    if (avcodec_open2(codec->pCodecCtx, codec->pCodec, NULL) < 0) {
-        LOGE("Could not open codec\n");
-        return;
-    }
-    codec->yuv_buffer = (uint8_t *)malloc(sizeof(uint8_t) * codec->IMG_HEIGHT * codec->IMG_WIDTH * 3 / 2);
-    codec->decode_times = 0;
-}
 
 int Java_com_example_fengweilun_hevcimageviewer_MyRender_nativeInit(JNIEnv *env, jclass clazz, jint tag)
 {
@@ -229,7 +140,6 @@ int Java_com_example_fengweilun_hevcimageviewer_MyRender_nativeInit(JNIEnv *env,
     GLuint gUniformTexY;
     GLuint gUniformTexU;
     GLuint gUniformTexV;
-    enum CODEC_NAME codec_name = (enum CODEC_NAME)tag;
 
     printGLString("Version", GL_VERSION);
     printGLString("Vendor", GL_VENDOR);
@@ -280,197 +190,98 @@ int Java_com_example_fengweilun_hevcimageviewer_MyRender_nativeInit(JNIEnv *env,
     glVertexAttribPointer(gAttribTexCoord, 2, GL_FLOAT, 0, 0,
                           textureCoords);
 
-    if(codec_name == CODEC_HEVC)
-    {
-        hevc.IMG_HEIGHT = 960;
-        hevc.IMG_WIDTH = 720;
-        hevc.codec_name = CODEC_HEVC;
-        codec_context_init(&hevc, "/storage/emulated/0/out.hevc");
-        glViewport(0, 0, hevc.IMG_WIDTH, hevc.IMG_HEIGHT);
-    }
-    else if (codec_name == CODEC_WEBP)
-    {
-        webp.IMG_HEIGHT = 640;
-        webp.IMG_WIDTH = 480;
-        webp.codec_name = CODEC_WEBP;
-        codec_context_init(&webp, "/storage/emulated/0/out.webp");
-        glViewport(0, 0, 720, 960);
-    }
-
     LOGI("setup finished\n");
-
+    ImageCodec::initImageCodec(1, 100);
     return 0;
 }
 
-static void decode_picture(CodecContext *codec)
+static int times = 0;
+jlong Java_com_example_fengweilun_hevcimageviewer_MyRender_nativeDrawFrame(JNIEnv * env, jclass clazz, jint tag)
 {
+    FILE *file;
+    long filesize;
     AVPacket packet;
-    int ret, got_picture = 0;
-    int len;
-    int in_len;
     int i;
-    uint8_t *ptr_buf;
-    uint8_t *in_data;
-    codec->pFrame = av_frame_alloc();
+    uint8_t *yuv_buffer, *ptr_buf;
+    CodecContext c;
+
+    pthread_mutex_init(&c.mutex, NULL);
+    pthread_cond_init(&c.output_cond, NULL);
+
     av_init_packet(&packet);
-    in_len = codec->filesize;
-    in_data = codec->buffer;
-    SwsContext *scale;
+    file = fopen("/storage/emulated/0/out.hevc", "rb");
+    if (!file) {
+        LOGE("Error open file");
+        return 0;
+    }
+    fseek(file, 0, SEEK_END);
+    filesize = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    //LOGI("filesize: %ld", filesize);
+    packet.data = (uint8_t *) malloc(sizeof(uint8_t) * filesize);
+    packet.size = (int)filesize;
+    if (!packet.data) {
+        LOGE("Error malloc file buf");
+        return 0;
+    }
+    if (filesize != fread(packet.data, 1, filesize, file)) {
+        LOGE("Error read file");
+        return 0;
+    }
+    fclose(file);
 
-    if(codec->codec_name == CODEC_HEVC)
+
+    c.packet = &packet;
+    c.pFrame = av_frame_alloc();
+
+    LOGE("Ready to decode one picture: %d", times++);
+    ImageCodec *ins = ImageCodec::GetInstance();
+    ins->decode_one_picture(&c);
+
+    yuv_buffer = (uint8_t *)malloc(sizeof(uint8_t) * c.pFrame->height * c.pFrame->width * 3 / 2);
+    ptr_buf = yuv_buffer;
+    for(i = 0; i < c.pFrame->height; i++)
     {
-        scale = NULL;
-        while (1)
-        {
-            len = av_parser_parse2(codec->pCodecParserCtx, codec->pCodecCtx, &packet.data,
-                                   &packet.size,
-                                   in_data,
-                                   in_len, AV_NOPTS_VALUE, AV_NOPTS_VALUE, AV_NOPTS_VALUE);
-            in_data += len;
-            in_len -= len;
-            if (packet.size == 0)
-                continue;
-            //Some Info from AVCodecParserContext
-            LOGI("[Packet]Size:%6d\t", packet.size);
-            LOGI("Number:%4d\n", codec->pCodecParserCtx->output_picture_number);
-
-            ret = avcodec_decode_video2(codec->pCodecCtx, codec->pFrame, &got_picture, &packet);
-            if (ret < 0) {
-                LOGE("Decode Error.\n");
-                return;
-            }
-            if (got_picture) {
-                LOGI("\nCodec Full Name:%s\n", codec->pCodecCtx->codec->long_name);
-                LOGI("width:%d\nheight:%d\n\n", codec->pCodecCtx->width, codec->pCodecCtx->height);
-
-                LOGI("Succeed to decode 1 frame!\n");
-                break;
-            }
-            if (in_len <= 0)
-                break;
-        }
+        memcpy(ptr_buf, c.pFrame->data[0] + i * c.pFrame->linesize[0], (size_t)c.pFrame->width);
+        ptr_buf += c.pFrame->width;
     }
-    else if(codec->codec_name == CODEC_WEBP)
+    for(i = 0; i < (c.pFrame->height >> 1); i++)
     {
-        scale = sws_getContext(codec->IMG_WIDTH, codec->IMG_HEIGHT, AV_PIX_FMT_YUV420P,
-                               720, 960, AV_PIX_FMT_YUV420P, SWS_BICUBIC, NULL, NULL, NULL);
-        packet.size = in_len;
-        packet.data = (uint8_t *)malloc((size_t)in_len);
-        memcpy(packet.data, in_data, (size_t)in_len);
-        ret = avcodec_decode_video2(codec->pCodecCtx, codec->pFrame, &got_picture, &packet);
-        if (ret < 0) {
-            LOGE("Decode Error.\n");
-            return;
-        }
+        memcpy(ptr_buf, c.pFrame->data[1] + i * c.pFrame->linesize[1], (size_t)c.pFrame->width >> 1);
+        ptr_buf += (c.pFrame->width >> 1);
     }
-    if(!got_picture) {
-        packet.data = NULL;
-        packet.size = 0;
-        while (1) {
-            ret = avcodec_decode_video2(codec->pCodecCtx, codec->pFrame, &got_picture, &packet);
-            if (ret < 0) {
-                LOGE("Decode Error.\n");
-                return;
-            }
-            if (!got_picture) {
-                break;
-            } else {
-
-                LOGI("Flush Decoder: Succeed to decode 1 frame!\n");
-                break;
-            }
-        }
-    }
-
-    ptr_buf = codec->yuv_buffer;
-    for(i = 0; i < codec->pFrame->height; i++)
+    for(i = 0; i < (c.pFrame->height >> 1); i++)
     {
-        memcpy(ptr_buf, codec->pFrame->data[0] + i * codec->pFrame->linesize[0], (size_t)codec->pFrame->width);
-        ptr_buf += codec->pFrame->width;
+        memcpy(ptr_buf, c.pFrame->data[2] + i * c.pFrame->linesize[2], (size_t)c.pFrame->width >> 1);
+        ptr_buf += (c.pFrame->width >> 1);
     }
-    for(i = 0; i < (codec->pFrame->height >> 1); i++)
-    {
-        memcpy(ptr_buf, codec->pFrame->data[1] + i * codec->pFrame->linesize[1], (size_t)codec->pFrame->width >> 1);
-        ptr_buf += (codec->pFrame->width >> 1);
-    }
-    for(i = 0; i < (codec->pFrame->height >> 1); i++)
-    {
-        memcpy(ptr_buf, codec->pFrame->data[2] + i * codec->pFrame->linesize[2], (size_t)codec->pFrame->width >> 1);
-        ptr_buf += (codec->pFrame->width >> 1);
-    }
-    if(codec->codec_name == CODEC_HEVC)
-    {
-        // upload textures
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        glActiveTexture(GL_TEXTURE0 + 0);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, codec->pFrame->width, codec->IMG_HEIGHT, 0,
-                     GL_LUMINANCE,
-                     GL_UNSIGNED_BYTE, codec->yuv_buffer);
-        glActiveTexture(GL_TEXTURE0 + 1);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, codec->pFrame->width >> 1,
-                     codec->IMG_HEIGHT >> 1, 0, GL_LUMINANCE,
-                     GL_UNSIGNED_BYTE, codec->yuv_buffer + codec->IMG_WIDTH * codec->IMG_HEIGHT);
-        glActiveTexture(GL_TEXTURE0 + 2);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, codec->pFrame->width >> 1,
-                     codec->IMG_HEIGHT >> 1, 0, GL_LUMINANCE,
-                     GL_UNSIGNED_BYTE,
-                     codec->yuv_buffer + codec->IMG_WIDTH * codec->IMG_HEIGHT * 5 / 4);
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-    }
-    else if(codec->codec_name == CODEC_WEBP)
-    {
-        const uint8_t *const srcslice[3] = {codec->yuv_buffer, codec->yuv_buffer + codec->IMG_WIDTH * codec->IMG_HEIGHT, codec->yuv_buffer + codec->IMG_WIDTH * codec->IMG_HEIGHT * 5 / 4};
-        uint8_t *const dstslice[3] = {yuv_webp, yuv_webp + 720 * 960, yuv_webp + 720 * 960 * 5 / 4};
-        const int srcStride[3] = {codec->pFrame->width, codec->pFrame->width >> 1, codec->pFrame->width >> 1};
-        int dstStride[3] = {720, 360, 360};
-        sws_scale(scale, srcslice, srcStride, 0, codec->pFrame->height, dstslice, dstStride);
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        glActiveTexture(GL_TEXTURE0 + 0);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, 720, 960, 0,
-                     GL_LUMINANCE,
-                     GL_UNSIGNED_BYTE, dstslice[0]);
-        glActiveTexture(GL_TEXTURE0 + 1);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, 360,
-                     480, 0, GL_LUMINANCE,
-                     GL_UNSIGNED_BYTE, dstslice[1]);
-        glActiveTexture(GL_TEXTURE0 + 2);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, 360,
-                     480, 0, GL_LUMINANCE,
-                     GL_UNSIGNED_BYTE,
-                     dstslice[2]);
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        LOGI("decode one webp frame");
-    }
-}
 
+    // upload textures
+    LOGI("ready to Render Frames. width: %d, height: %d", c.pFrame->width, c.pFrame->height);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glActiveTexture(GL_TEXTURE0 + 0);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, c.pFrame->width, c.pFrame->height, 0,
+                 GL_LUMINANCE,
+                 GL_UNSIGNED_BYTE, yuv_buffer);
+    glActiveTexture(GL_TEXTURE0 + 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, c.pFrame->width >> 1,
+                 c.pFrame->height >> 1, 0, GL_LUMINANCE,
+                 GL_UNSIGNED_BYTE, yuv_buffer + c.pFrame->height * c.pFrame->width);
+    glActiveTexture(GL_TEXTURE0 + 2);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, c.pFrame->width >> 1,
+                 c.pFrame->height >> 1, 0, GL_LUMINANCE,
+                 GL_UNSIGNED_BYTE,
+                 yuv_buffer + c.pFrame->height * c.pFrame->width * 5 / 4);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-jlong
-Java_com_example_fengweilun_hevcimageviewer_MyRender_nativeDrawFrame(JNIEnv *env, jclass clazz, jint tag)
-{
-    enum CODEC_NAME codec_name = (enum CODEC_NAME)tag;
-    if(codec_name == CODEC_HEVC) {
-        decode_picture(&hevc);
-        return ++hevc.decode_times;
-    }
-    else if(codec_name == CODEC_WEBP) {
-        decode_picture(&webp);
-        return ++webp.decode_times;
-    }
-}
+    free(yuv_buffer);
+    free(packet.data);
+    av_packet_unref(&packet);
+    av_frame_unref(c.pFrame);
 
-
-}
-
-
-
-
-
-
-int Java_com_example_fengweilun_hevcimageviewer_MyRender_nativeSetup(jint w, jint h) {
-
-    LOGI("setupGraphics(%d, %d)", w, h);
-
+    pthread_mutex_destroy(&c.mutex);
+    pthread_cond_destroy(&c.output_cond);
     return 0;
+}
 }
